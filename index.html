@@ -1100,11 +1100,29 @@ position:relative}[data-framer-component-type=DeviceComponent].no-device>*{width
       });
     }
 
-    // Track scroll velocity
+    // Track scroll velocity (global page scroll, used when not hovering a column)
     let scrollVel = 0;
     let lastScrollY = window.scrollY;
     let lastTs = performance.now();
     let rafId = null;
+
+    // Per-column hover state + per-column velocity (from wheel input when hovered)
+    let hoveredCol = -1; // index of column being hovered, or -1
+    const colVel = [0, 0, 0]; // velocity contribution per column from wheel
+
+    // Hook up hover detection on each column's wrapper (.grid-col)
+    colEls.forEach((el, i) => {
+      const parent = el.parentElement; // .grid-col
+      if (!parent) return;
+      parent.addEventListener('mouseenter', () => { hoveredCol = i; });
+      parent.addEventListener('mouseleave', () => { if (hoveredCol === i) hoveredCol = -1; });
+      // Capture wheel on hover: apply to THIS column only, prevent page scroll
+      parent.addEventListener('wheel', (e) => {
+        if (hoveredCol !== i) return;
+        e.preventDefault();
+        colVel[i] += e.deltaY;
+      }, { passive: false });
+    });
 
     window.addEventListener('scroll', () => {
       const delta = window.scrollY - lastScrollY;
@@ -1116,16 +1134,20 @@ position:relative}[data-framer-component-type=DeviceComponent].no-device>*{width
       const dt = Math.min((ts - lastTs) / 1000, 0.05);
       lastTs = ts;
 
-      // Decay scroll velocity
+      // Decay velocities
       scrollVel *= 0.88;
+      for (let k = 0; k < 3; k++) colVel[k] *= 0.85;
 
       colEls.forEach((el, i) => {
-        const move = AUTO_SPEEDS[i] * dt + Math.abs(scrollVel) * SCROLL_MUL[i];
+        let move = AUTO_SPEEDS[i] * dt + Math.abs(scrollVel) * SCROLL_MUL[i];
+        // Add wheel-driven boost for this column
+        move += colVel[i] * 0.25;
         offsets[i] += move;
 
-        // Seamless loop
-        if (halfHeights[i] > 0 && offsets[i] >= halfHeights[i]) {
-          offsets[i] -= halfHeights[i];
+        // Seamless loop (handle both directions)
+        if (halfHeights[i] > 0) {
+          if (offsets[i] >= halfHeights[i]) offsets[i] -= halfHeights[i];
+          else if (offsets[i] < 0) offsets[i] += halfHeights[i];
         }
 
         el.style.transform = `translateY(-${offsets[i]}px)`;
